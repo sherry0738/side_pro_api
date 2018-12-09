@@ -1,0 +1,14 @@
+{
+  "name": "side_pro_api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Sherry",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.16.4"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
