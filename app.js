@@ -5,6 +5,19 @@ const PORT = process.env.PORT || 3001;
 
 app.use (cors ());
 
+let bodyParser = require ('body-parser');
+app.use (bodyParser.json ());
+
+const pgp = require ('pg-promise') ();
+const cn = {
+  host: 'localhost',
+  port: 5432,
+  database: 'side_pro',
+  user: CONFIG.USER,
+  password: CONFIG.PASSWORD,
+};
+const db = pgp (cn);
+
 var mockData = {
   quizzes: [
     {
@@ -68,6 +81,15 @@ function decodeToken (req) {
 
 app.get ('/', (req, res, next) => {
   validateUser (req, res);
+});
+
+app.post ('/', (req, res) => {
+  db.task (t => {
+    return t.oneOrNone ('SELECT google_id FROM USERS').then (user => {
+      res.send (user);
+      return user;
+    });
+  });
 });
 
 function parsetJwtToken (authToken) {
