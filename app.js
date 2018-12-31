@@ -16,9 +16,9 @@ const cn = {
   user: CONFIG.USER,
   password: CONFIG.PASSWORD,
 };
-const db = pgp (cn);
+const db = pgp (cn); // database instance;
 
-var mockData = {
+let mockData = {
   quizzes: [
     {
       question_body: 'Which color listed below used for Zendesk socks design?',
@@ -68,50 +68,92 @@ var mockData = {
   totalCount: 2,
 };
 
-function decodeToken (req) {
-  var auth = req.get ('authorization');
+decodeToken = req => {
+  let auth = req.get ('authorization');
   if (!auth) {
+    console.log ('Log in failed');
     return false;
   }
-  var isBearerAuth = auth.split (' ')[0].toLowerCase () === 'bearer';
+  let isBearerAuth = auth.split (' ')[0].toLowerCase () === 'bearer';
   if (auth && isBearerAuth) {
     return parsetJwtToken (auth);
   }
-}
+};
 
 app.get ('/', (req, res, next) => {
-  validateUser (req, res);
-});
-
-app.post ('/', (req, res) => {
-  db.task (t => {
-    return t.oneOrNone ('SELECT google_id FROM USERS').then (user => {
-      res.send (user);
-      return user;
-    });
-  });
+  const decodedToken = decodeToken (req);
+  console.log ('decodedToken.sub', decodedToken.sub);
+  const isValidated = doValidate (decodedToken, res);
+  console.log ('isValidated', isValidated);
+  if (isValidated) {
+    db
+      .task (t => {
+        return t
+          .oneOrNone ('SELECT * FROM USERS where google_id = ${google_id}', {
+            google_id: decodedToken.sub,
+          })
+          .then (user => {
+            if (!user) {
+              // No found in db, ready to save into db
+              return t
+                .oneOrNone (
+                  'INSERT INTO users (google_id,email,given_name,family_name,default_avatar_url) VALUES (${google_id},${email},${given_name},${family_name},${default_avatar_url}) RETURNING id;',
+                  {
+                    google_id: decodedToken.sub,
+                    email: decodedToken.email,
+                    given_name: decodedToken.given_name,
+                    family_name: decodedToken.family_name,
+                    default_avatar_url: decodedToken.picture,
+                  }
+                )
+                .then (result => {
+                  console.log ('result', result);
+                });
+            }
+            return mockData;
+            // return res.send (mockData);
+          });
+      })
+      .then (events => {
+        console.log (events);
+      })
+      .catch (error => {
+        console.log (error);
+      })
+      .finally (res.sendStatus (200));
+  }
 });
 
 function parsetJwtToken (authToken) {
-  var base64Url = authToken.split ('.')[1];
-  var base64 = base64Url.replace ('-', '+').replace ('_', '/');
+  let base64Url = authToken.split ('.')[1];
+  let base64 = base64Url.replace ('-', '+').replace ('_', '/');
   return JSON.parse (Buffer.from (base64, 'base64').toString ());
 }
 
-function validateUser (req, res) {
-  const decodedToken = decodeToken (req);
-
-  // Both of aud(audience) and iss(issuer) are correct, so the user is authorized.
+function doValidate (decodedToken, res) {
   if (!decodedToken.aud || !decodedToken.iss) {
-    return res.status (401).send ('Authorization Required 1');
+    return res
+      .status (401)
+      .send (
+        'The user need log in with a Google account. Authorization Required 1'
+      );
   }
-  var clientId = CONFIG.CLIENT_ID;
-  var verifiedUrl = 'accounts.google.com' || 'https://accounts.google.com';
-  if (decodedToken.aud === clientId && decodedToken.iss === verifiedUrl) {
-    res.send (mockData);
-  } else {
-    return res.status (401).send ('Authorization Required');
+  let clientId = CONFIG.CLIENT_ID;
+  let verifiedUrl = 'accounts.google.com' || 'https://accounts.google.com';
+  const validatedUser =
+    decodedToken.aud === clientId &&
+    decodedToken.iss === verifiedUrl &&
+    decodedToken.email_verified === true;
+
+  if (!validatedUser) {
+    return res
+      .status (401)
+      .send (
+        'The user need log in with a Google account. Authorization Required 2'
+      );
   }
+  console.log ('validation done!');
+  return true;
 }
 
 app.listen (PORT, () => console.log (`Example app listening on port ${PORT}!`));
