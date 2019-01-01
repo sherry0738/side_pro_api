@@ -13,62 +13,10 @@ const cn = {
   host: 'localhost',
   port: 5432,
   database: 'side_pro',
-  user: CONFIG.USER,
-  password: CONFIG.PASSWORD,
+  user: 'CONFIG.USER',
+  password: 'CONFIG.PASSWORD',
 };
 const db = pgp (cn); // database instance;
-
-let mockData = {
-  quizzes: [
-    {
-      question_body: 'Which color listed below used for Zendesk socks design?',
-      answers: [
-        {
-          title: 'a',
-          description: 'purple',
-          is_correct: false,
-        },
-        {
-          title: 'b',
-          description: 'yellow',
-          is_correct: false,
-        },
-        {
-          title: 'c',
-          description: 'orange',
-          is_correct: true,
-        },
-      ],
-      points: '2',
-      id: '1',
-      order_num: 1,
-    },
-    {
-      question_body: 'What setence Jeff(from Galahs Team) uses for yarling team member when pairing?',
-      answers: [
-        {
-          title: 'a',
-          description: 'Faster',
-          is_correct: true,
-        },
-        {
-          title: 'b',
-          description: "What's wrong with you?",
-          is_correct: false,
-        },
-        {
-          title: 'c',
-          description: 'Are you listening?',
-          is_correct: false,
-        },
-      ],
-      points: 3,
-      id: '2',
-      order_num: 2,
-    },
-  ],
-  totalCount: 2,
-};
 
 decodeToken = req => {
   let auth = req.get ('authorization');
@@ -80,6 +28,56 @@ decodeToken = req => {
   if (auth && isBearerAuth) {
     return parsetJwtToken (auth);
   }
+};
+const createNewQuizAnswer = ele => {
+  return {
+    title: ele.content_order,
+    content: ele.content,
+  };
+};
+
+const mapToQuizJson = rawJson => {
+  let quizzes = [];
+
+  rawJson.forEach (element => {
+    if (quizzes.length === 0) {
+      let quiz = {
+        id: element.id,
+        question_body: element.question_body,
+        order_num: element.order_num,
+        type: element.type,
+        answers: [],
+      };
+      let newQuizAnswer = createNewQuizAnswer (element);
+      quiz.answers.push (newQuizAnswer);
+      quizzes.push (quiz);
+    } else {
+      let foundQuiz = false;
+
+      for (var i = 0; i < quizzes.length; i++) {
+        if (quizzes[i].id == element.id) {
+          foundQuiz = true;
+          let newQuizAnswer = createNewQuizAnswer (element);
+          quizzes[i].answers.push (newQuizAnswer);
+        }
+      }
+      if (!foundQuiz) {
+        let quiz = {
+          id: element.id,
+          question_body: element.question_body,
+          points: element.points,
+          order_num: element.order_num,
+          type: element.type,
+          answers: [],
+        };
+        let newQuizAnswer = createNewQuizAnswer (element);
+        quiz.answers.push (newQuizAnswer);
+        quizzes.push (quiz);
+      }
+    }
+  });
+  console.log ('stringified quizzes-', JSON.stringify (quizzes));
+  return quizzes;
 };
 
 app.get ('/', (req, res, next) => {
@@ -97,32 +95,34 @@ app.get ('/', (req, res, next) => {
           .then (user => {
             if (!user) {
               // No found in db, ready to save into db
-              return t
-                .oneOrNone (
-                  'INSERT INTO users (google_id,email,given_name,family_name,default_avatar_url) VALUES (${google_id},${email},${given_name},${family_name},${default_avatar_url}) RETURNING id;',
-                  {
-                    google_id: decodedToken.sub,
-                    email: decodedToken.email,
-                    given_name: decodedToken.given_name,
-                    family_name: decodedToken.family_name,
-                    default_avatar_url: decodedToken.picture,
-                  }
-                )
-                .then (result => {
-                  console.log ('result', result);
-                });
+              return t.oneOrNone (
+                'INSERT INTO users (google_id,email,given_name,family_name,default_avatar_url) VALUES (${google_id},${email},${given_name},${family_name},${default_avatar_url}) RETURNING id;',
+                {
+                  google_id: decodedToken.sub,
+                  email: decodedToken.email,
+                  given_name: decodedToken.given_name,
+                  family_name: decodedToken.family_name,
+                  default_avatar_url: decodedToken.picture,
+                }
+              );
             }
-            //res.send (mockData);
-            return mockData;
-            return;
+            return user;
           });
       })
-      .then (events => {
-        console.log (events);
-        res.send (events);
+      .then (user => {
+        return db.task (t => {
+          return t.any (
+            'SELECT q.id, q.question_body, q.order_num, q.type, a.content_order, a.content, a.is_correct, u.given_name, u.family_name, u.default_avatar_url, s.scores FROM QUESTIONS Q LEFT JOIN ANSWERS A on Q.id = A.question_id LEFT JOIN SCORES S on Q.id = S.id LEFT JOIN USERS U on U.id = Q.created_by order by a.content_order asc'
+          );
+        });
+      })
+      .then (result => {
+        console.log ('result', result);
+        var quizzes = mapToQuizJson (result);
+        res.send (quizzes);
       })
       .catch (error => {
-        console.log (error);
+        console.log ('error', error);
       })
       .finally ();
   }
