@@ -118,7 +118,6 @@ app.get ('/', (req, res, next) => {
         });
       })
       .then (result => {
-        console.log ('result', result);
         var quizzes = mapToQuizJson (result);
         res.send (quizzes);
       })
@@ -131,9 +130,8 @@ app.get ('/', (req, res, next) => {
 
 app.post ('/quiz', (req, res) => {
   const decodedToken = decodeToken (req);
-  //console.log ('decodedToken.sub', decodedToken.sub);
   const isValidated = doValidate (decodedToken, res);
-  //console.log ('isValidated', isValidated);
+
   if (isValidated) {
     db
       .task (t => {
@@ -151,23 +149,56 @@ app.post ('/quiz', (req, res) => {
       })
       .then (userId => {
         if (userId) {
-          console.log ('here', req.body);
           return db.task (t => {
+            return t
+              .oneOrNone (
+                'SELECT id FROM answers where question_id=${question_id} AND is_correct=true',
+                {
+                  question_id: req.body.questionId,
+                }
+              )
+              .then (answer => {
+                if (answer.id === req.body.selectAnswerId) {
+                  return {userId: userId, isCorrect: true};
+                } else {
+                  return {userId: userId, isCorrect: false};
+                }
+              });
+          });
+        } else {
+          return null;
+        }
+      })
+      .then (result => {
+        console.log ('result for isCorrect', result);
+        if (result.isCorrect) {
+          db.task (t => {
             return t.oneOrNone (
-              'INSERT INTO scores(user_id, question_id, selected_answer_id, scores, created_at)  SELECT ${user_id},question_id,${selected_answer_id},q.scores, now() FROM answers a left join questions q on a.question_id = q.id where a.id = ${selected_answer_id} RETURNING id;',
+              'INSERT INTO scores(user_id, question_id, selected_answer_id, scores, created_at)  SELECT ${user_id},question_id,${selected_answer_id}, q.scores, now() FROM answers a left join questions q on a.question_id = q.id where a.id = ${selected_answer_id} RETURNING id;',
               {
-                user_id: userId,
-                selected_answer_id: req.body.answerId,
+                user_id: result.userId,
+                selected_answer_id: req.body.selectAnswerId,
+              }
+            );
+          });
+        } else {
+          db.task (t => {
+            return t.oneOrNone (
+              'INSERT INTO scores(user_id, question_id, selected_answer_id, scores, created_at)  SELECT ${user_id},question_id,${selected_answer_id}, 0, now() FROM answers a left join questions q on a.question_id = q.id where a.id = ${selected_answer_id} RETURNING id;',
+              {
+                user_id: result.userId,
+                selected_answer_id: req.body.selectAnswerId,
               }
             );
           });
         }
-        return scores;
+        const isCorrect = {isCorrect: result.isCorrect};
+        res.send (isCorrect);
       })
       .catch (error => {
         console.log ('error', error);
       })
-      .finally (res.sendStatus (200));
+      .finally ();
   }
 });
 
