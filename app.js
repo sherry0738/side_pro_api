@@ -202,6 +202,53 @@ app.post ('/quiz', (req, res) => {
   }
 });
 
+app.post ('/user', (req, res) => {
+  const decodedToken = decodeToken (req);
+  const isValidated = doValidate (decodedToken, res);
+
+  if (isValidated) {
+    db
+      .task (t => {
+        return t
+          .oneOrNone ('SELECT * FROM USERS where google_id = ${google_id}', {
+            google_id: decodedToken.sub,
+          })
+          .then (user => {
+            if (!user) {
+              // No found in db, ready to save into db
+              return 'Error';
+            }
+            console.log ('user in new post!!!!', user);
+            return user;
+          });
+      })
+      .then (user => {
+        db.task (t => {
+          return t.oneOrNone (
+            'UPDATE users SET avatar_border=${avatar_border}, avatar_background_colour=${avatar_background_colour}, avatar_symbol=${avatar_symbol}, created_at=now() WHERE id=${user_id} RETURNING id;',
+            {
+              user_id: user.id,
+              avatar_border: req.body.avatar_border,
+              avatar_background_colour: req.body.avatar_background_colour,
+              avatar_symbol: req.body.avatar_symbol,
+            }
+          );
+        });
+        const updatedAvatar = {
+          isUpdated: true,
+          avatar_border: req.body.avatar_border,
+          avatar_background_colour: req.body.avatar_background_colour,
+          avatar_symbol: req.body.avatar_symbol,
+        };
+        res.send (updatedAvatar);
+      })
+      .catch (error => {
+        console.log ('error', error);
+      })
+      .finally ();
+  }
+});
+
 function parsetJwtToken (authToken) {
   let base64Url = authToken.split ('.')[1];
   let base64 = base64Url.replace ('-', '+').replace ('_', '/');
@@ -217,7 +264,7 @@ function doValidate (decodedToken, res) {
       );
   }
 
-  var clientId = CONFIG.CLIENT_ID;
+  // var clientId = CONFIG.CLIENT_ID;
   let verifiedUrl = 'accounts.google.com' || 'https://accounts.google.com';
   const validatedUser =
     decodedToken.aud === clientId &&
