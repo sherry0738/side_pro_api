@@ -2,6 +2,7 @@ const express = require ('express');
 const cors = require ('cors');
 const app = express ();
 const PORT = process.env.PORT || 3001;
+require ('dotenv').config ();
 
 app.use (cors ());
 
@@ -10,11 +11,11 @@ app.use (bodyParser.json ());
 
 const pgp = require ('pg-promise') ();
 const cn = {
-  host: 'localhost',
-  port: 5432,
-  database: 'side_pro',
-  user: 'CONFIG.USER',
-  password: 'CONFIG.PASSWORD',
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_DATABASE,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
 };
 const db = pgp (cn); // database instance;
 
@@ -264,7 +265,7 @@ function doValidate (decodedToken, res) {
       );
   }
 
-  // var clientId = CONFIG.CLIENT_ID;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
   let verifiedUrl = 'accounts.google.com' || 'https://accounts.google.com';
   const validatedUser =
     decodedToken.aud === clientId &&
