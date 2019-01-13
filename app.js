@@ -30,6 +30,27 @@ decodeToken = req => {
     return parsetJwtToken (auth);
   }
 };
+
+const mapToUserJson = rawJson => {
+  console.log ('rawJson in mapto user json', rawJson);
+  let user = {
+    id: rawJson.id,
+    google_id: rawJson.google_id,
+    email: rawJson.email,
+    given_name: rawJson.given_name,
+    family_name: rawJson.family_name,
+    default_avatar_url: rawJson.default_avatar_url,
+    avaBorder: rawJson.avatar_border,
+    avaBGround: rawJson.avatar_background_colour,
+    avaSymobol: rawJson.avatar_symbol,
+    scores: rawJson.scores,
+    question_id: rawJson.question_id,
+    created_at: rawJson.created_at,
+  };
+  console.log ('strignified user', JSON.stringify (user));
+  return user;
+};
+
 const createNewQuizAnswer = ele => {
   return {
     id: ele.answer_id,
@@ -83,6 +104,92 @@ const mapToQuizJson = rawJson => {
 };
 
 app.get ('/', (req, res, next) => {
+  const decodedToken = decodeToken (req);
+  console.log ('decodedToken.sub', decodedToken.sub);
+  const isValidated = doValidate (decodedToken, res);
+  console.log ('isValidated', isValidated);
+  if (isValidated) {
+    db.task (t => {
+      return t
+        .oneOrNone ('SELECT * FROM USERS where google_id = ${google_id}', {
+          google_id: decodedToken.sub,
+        })
+        .then (user => {
+          if (!user) {
+            // No found in db, ready to save into db
+            return t.oneOrNone (
+              'INSERT INTO users (google_id,email,given_name,family_name,default_avatar_url) VALUES (${google_id},${email},${given_name},${family_name},${default_avatar_url}) RETURNING id;',
+              {
+                google_id: decodedToken.sub,
+                email: decodedToken.email,
+                given_name: decodedToken.given_name,
+                family_name: decodedToken.family_name,
+                default_avatar_url: decodedToken.picture,
+              }
+            );
+          }
+          var userInfo = mapToUserJson (user);
+          res.send (userInfo);
+        })
+        .catch (error => {
+          console.log ('error', error);
+        })
+        .finally ();
+    });
+  }
+});
+
+app.get ('/quiz/result', (req, res, next) => {
+  const decodedToken = decodeToken (req);
+  console.log ('decodedToken.sub', decodedToken.sub);
+  const isValidated = doValidate (decodedToken, res);
+  console.log ('isValidated', isValidated);
+  if (isValidated) {
+    db
+      .task (t => {
+        return t
+          .oneOrNone ('SELECT * FROM USERS where google_id = ${google_id}', {
+            google_id: decodedToken.sub,
+          })
+          .then (user => {
+            if (!user) {
+              // No found in db, ready to save into db
+              return t.oneOrNone (
+                'INSERT INTO users (google_id,email,given_name,family_name,default_avatar_url) VALUES (${google_id},${email},${given_name},${family_name},${default_avatar_url}) RETURNING id;',
+                {
+                  google_id: decodedToken.sub,
+                  email: decodedToken.email,
+                  given_name: decodedToken.given_name,
+                  family_name: decodedToken.family_name,
+                  default_avatar_url: decodedToken.picture,
+                }
+              );
+            }
+            return user;
+          });
+      })
+      .then (user => {
+        return db.task (t => {
+          return t.any (
+            "SELECT q.id as question_id, a.id as answer_id, a.is_correct,case when a.is_correct=true then scores else 0 end as scores FROM questions q left join answers a on a.question_id = q.id where q.type='onboarding' and a.created_by=${created_by};",
+            {
+              // type: req.type,
+              created_by: user.id,
+            }
+          );
+        });
+      })
+      .then (result => {
+        res.send (result);
+      })
+      .catch (error => {
+        console.log ('error', error);
+      })
+      .finally ();
+  }
+});
+
+app.get ('/quiz', (req, res, next) => {
   const decodedToken = decodeToken (req);
   console.log ('decodedToken.sub', decodedToken.sub);
   const isValidated = doValidate (decodedToken, res);
@@ -153,6 +260,30 @@ app.post ('/quiz', (req, res) => {
           return db.task (t => {
             return t
               .oneOrNone (
+                'SELECT count(1) FROM answers where question_id=${question_id} AND created_by=${created_by}',
+                {
+                  question_id: req.body.questionId,
+                  created_by: userId,
+                }
+              )
+              .then (result => {
+                if (result === 0) {
+                  return userId;
+                } else {
+                  res
+                    .status (400)
+                    .send ({error: 'The answer was already submitted!'});
+                  return null;
+                }
+              });
+          });
+        }
+      })
+      .then (userId => {
+        if (userId) {
+          return db.task (t => {
+            return t
+              .oneOrNone (
                 'SELECT id FROM answers where question_id=${question_id} AND is_correct=true',
                 {
                   question_id: req.body.questionId,
@@ -172,6 +303,9 @@ app.post ('/quiz', (req, res) => {
       })
       .then (result => {
         console.log ('result for isCorrect', result);
+        if (!result) {
+          return null;
+        }
         if (result.isCorrect) {
           db.task (t => {
             return t.oneOrNone (
